@@ -152,6 +152,15 @@ where W::Descr: DescriptorRgb<K>
         self.wallet.construct_psbt_rgb(&self.stock, invoice, params)
     }
 
+    pub fn construct_psbt_with_specific_outpoint(
+        &mut self,
+        invoice: &RgbInvoice,
+        psbt: Psbt,
+    ) -> Result<Psbt, CompositionError> {
+        self.wallet
+            .construct_psbt_rgb_with_specific_outpoint(&self.stock, invoice, psbt)
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn transfer(
         &mut self,

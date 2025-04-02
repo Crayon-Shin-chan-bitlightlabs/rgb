@@ -131,6 +131,145 @@ where Self::Descr: DescriptorRgb<K>
         Ok((psbt, meta, transfer))
     }
 
+    fn construct_psbt_rgb_with_specific_outpoint<
+        S: StashProvider,
+        H: StateProvider,
+        P: IndexProvider,
+    >(
+        &mut self,
+        stock: &Stock<S, H, P>,
+        invoice: &RgbInvoice,
+        mut psbt: Psbt,
+    ) -> Result<Psbt, CompositionError> {
+        use bpstd::seals::txout::TxoSeal;
+        use bpstd::{Descriptor, Terminal};
+        use bpwallet::Derive;
+
+        struct ContractOutpointsFilter<'a, S: StashProvider, H: StateProvider, P: IndexProvider> {
+            contract_id: ContractId,
+            stock: &'a Stock<S, H, P>,
+        }
+
+        impl<S, H, P> AssignmentsFilter for ContractOutpointsFilter<'_, S, H, P>
+        where
+            S: StashProvider,
+            H: StateProvider,
+            P: IndexProvider,
+        {
+            fn should_include(&self, output: impl Into<Outpoint>, _id: Option<Txid>) -> bool {
+                let output = output.into();
+                matches!(self.stock.contract_assignments_for(self.contract_id, [output]), Ok(list) if !list.is_empty())
+            }
+        }
+
+        let contract_id = invoice.contract.ok_or(CompositionError::NoContract)?;
+
+        let iface_name = invoice
+            .iface
+            .as_ref()
+            .ok_or(CompositionError::NoIface)
+            .map(ToOwned::to_owned)?;
+
+        let iface = stock
+            .iface(iface_name.clone())
+            .map_err(|err| CompositionError::Stock(err.to_string()))?;
+
+        let contract = stock
+            .contract_iface(contract_id, iface_name)
+            .map_err(|err| CompositionError::Stock(err.to_string()))?;
+
+        let operation = invoice
+            .operation
+            .as_ref()
+            .or(iface.default_operation.as_ref())
+            .ok_or(CompositionError::NoOperation)?;
+
+        let assignment_name = invoice
+            .assignment
+            .as_ref()
+            .or_else(|| {
+                iface
+                    .transitions
+                    .get(operation)
+                    .and_then(|t| t.default_assignment.as_ref())
+            })
+            .cloned()
+            .ok_or(CompositionError::NoAssignment)?;
+
+        let filter = ContractOutpointsFilter { contract_id, stock };
+
+        let psbt_previous_outputs = psbt
+            .inputs()
+            .map(|input| input.previous_outpoint)
+            .collect::<Vec<_>>();
+
+        let prev_outputs = match &invoice.owned_state {
+            InvoiceState::Amount(amount) => {
+                let state: BTreeMap<_, Vec<Amount>> = contract
+                    .fungible(assignment_name, &filter)
+                    .map_err(CompositionError::Interface)?
+                    .fold(bmap![], |mut set, alloc| {
+                        set.entry(alloc.seal).or_default().push(alloc.state);
+                        set
+                    });
+
+                let mut state: Vec<_> = state
+                    .into_iter()
+                    .map(|(seal, vals)| (vals.iter().copied().sum::<Amount>(), seal, vals))
+                    .collect();
+                state.sort_by_key(|(sum, _, _)| *sum);
+
+                let mut sum = Amount::ZERO;
+                let prev_outputs = state
+                    .iter()
+                    .rev()
+                    .filter(|(_, seal, _)| match seal.outpoint() {
+                        Some(outpoint) => psbt_previous_outputs.contains(&outpoint),
+                        None => false,
+                    })
+                    .map(|(val, seal, _)| {
+                        sum += *val;
+                        *seal
+                    })
+                    .collect::<BTreeSet<_>>();
+                assert_eq!(sum, *amount);
+                prev_outputs
+            }
+            _ => unreachable!(),
+        };
+
+        assert_eq!(psbt.outputs().count(), 1);
+
+        if let Some(output) = psbt.output_mut(0) {
+            let change_keychain = RgbKeychain::Internal;
+            let change_index = self.next_derivation_index(change_keychain, true);
+            let change_terminal = Terminal::new(change_keychain, change_index);
+            let script = self.descriptor().derive(change_keychain, change_index);
+
+            output.script = script.to_script_pubkey();
+            output.redeem_script = script.to_redeem_script();
+            output.witness_script = script.to_witness_script();
+            output.bip32_derivation = self.descriptor().legacy_keyset(change_terminal);
+            output.tap_internal_key = script.to_internal_pk();
+            output.tap_tree = script.to_tap_tree();
+            output.tap_bip32_derivation = self.descriptor().xonly_keyset(change_terminal);
+            output.proprietary = none!();
+            output.unknown = none!();
+        }
+
+        psbt.outputs_mut()
+            .find(|o| o.script.is_p2tr())
+            .map(|o| o.set_tapret_host().expect("just created"));
+
+        let batch = stock
+            .compose(invoice, prev_outputs, Option::<Vout>::None, |_, _, _| Some(Vout::from_u32(0)))
+            .map_err(|err| CompositionError::Stock(err.to_string()))?;
+
+        psbt.complete_construction();
+        psbt.rgb_embed(batch).map_err(CompositionError::Embed)?;
+        Ok(psbt)
+    }
+
     #[allow(clippy::result_large_err)]
     fn construct_psbt_rgb<S: StashProvider, H: StateProvider, P: IndexProvider>(
         &mut self,
