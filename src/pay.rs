@@ -163,6 +163,7 @@ where Self::Descr: DescriptorRgb<K>
         }
 
         let contract_id = invoice.contract.ok_or(CompositionError::NoContract)?;
+        let close_method = self.descriptor().close_method();
 
         let iface_name = invoice
             .iface
@@ -220,7 +221,7 @@ where Self::Descr: DescriptorRgb<K>
                 state.sort_by_key(|(sum, _, _)| *sum);
 
                 let mut sum = Amount::ZERO;
-                let prev_outputs = state
+                let selection = state
                     .iter()
                     .rev()
                     .filter(|(_, seal, _)| match seal.outpoint() {
@@ -232,13 +233,16 @@ where Self::Descr: DescriptorRgb<K>
                         *seal
                     })
                     .collect::<BTreeSet<_>>();
-                assert_eq!(sum, *amount);
-                prev_outputs
+                if sum < *amount {
+                    bset![]
+                } else {
+                    selection
+                }
             }
             _ => unreachable!(),
         };
 
-        assert_eq!(psbt.outputs().count(), 1);
+        assert!(psbt.outputs().count() > 0);
 
         if let Some(output) = psbt.output_mut(0) {
             let change_keychain = RgbKeychain::Internal;
@@ -265,6 +269,7 @@ where Self::Descr: DescriptorRgb<K>
             .compose(invoice, prev_outputs, Option::<Vout>::None, |_, _, _| Some(Vout::from_u32(0)))
             .map_err(|err| CompositionError::Stock(err.to_string()))?;
 
+        psbt.set_rgb_close_method(close_method);
         psbt.complete_construction();
         psbt.rgb_embed(batch).map_err(CompositionError::Embed)?;
         Ok(psbt)

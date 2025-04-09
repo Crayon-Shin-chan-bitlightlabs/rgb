@@ -29,8 +29,6 @@ use bpwallet::fs::FsTextStore;
 #[cfg(feature = "fs")]
 use bpwallet::Wallet;
 use bpwallet::{Layer2, NoLayer2};
-#[cfg(not(target_arch = "wasm32"))]
-use nonasync::persistence::PersistenceProvider;
 use psrgbt::{Psbt, PsbtMeta};
 use rgbstd::containers::Transfer;
 use rgbstd::interface::{ContractOp, IfaceRef};
@@ -43,7 +41,7 @@ use rgbstd::persistence::{
 
 use super::{
     CompletionError, CompositionError, ContractId, DescriptorRgb, PayError, TransferParams,
-    WalletError, WalletProvider,
+    WalletProvider,
 };
 use crate::invoice::RgbInvoice;
 
