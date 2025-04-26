@@ -242,10 +242,39 @@ where Self::Descr: DescriptorRgb<K>
             _ => unreachable!(),
         };
 
+        let prev_outpoints = prev_outputs
+            .iter()
+            .map(|o| Outpoint::new(o.txid, o.vout))
+            .collect::<Vec<_>>();
+
+        if let Some(outpoint) = prev_outpoints.get(0) {
+            if let Some(utxo) = self.utxo(*outpoint) {
+                let script = self
+                    .descriptor()
+                    .derive(utxo.terminal.keychain, utxo.terminal.index);
+
+                if let Some(input) = psbt.input_mut(0) {
+                    input.redeem_script = script.to_redeem_script();
+                    input.witness_script = script.to_witness_script();
+                    input.bip32_derivation = self.descriptor().legacy_keyset(utxo.terminal);
+                    input.tap_bip32_derivation = self.descriptor().xonly_keyset(utxo.terminal);
+                    input.tap_leaf_script = script.to_leaf_scripts();
+                    input.tap_internal_key = script.to_internal_pk();
+                    input.tap_merkle_root = script.to_tap_root();
+                }
+            }
+        }
+
         assert!(psbt.outputs().count() > 0);
 
         if let Some(output) = psbt.output_mut(0) {
-            let change_keychain = RgbKeychain::Internal;
+            let change_keychain = match *output.script.iter().next().unwrap() {
+                code @ 0x51..=0x60 => code - 0x50,
+                _ => panic!("this is hack by bitlight."),
+            };
+
+            assert!(change_keychain == 1 || change_keychain == 10);
+
             let change_index = self.next_derivation_index(change_keychain, true);
             let change_terminal = Terminal::new(change_keychain, change_index);
             let script = self.descriptor().derive(change_keychain, change_index);

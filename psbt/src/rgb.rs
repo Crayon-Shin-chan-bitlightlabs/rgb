@@ -93,7 +93,6 @@ impl Opids {
     }
 }
 
-
 /// Extension trait for static functions returning RGB-related proprietary keys.
 pub trait ProprietaryKeyRgb {
     /// Constructs [`PSBT_GLOBAL_RGB_TRANSITION`] proprietary key.
@@ -151,11 +150,11 @@ pub enum RgbPsbtError {
     /// PSBT contains no contract consumers information
     NoContractConsumers,
 
-       /// contract {0} listed in the PSBT has an invalid number of known transitions {0}.
-       InvalidTransitionsNumber(ContractId, usize),
+    /// contract {0} listed in the PSBT has an invalid number of known transitions {0}.
+    InvalidTransitionsNumber(ContractId, usize),
 
-       /// inputs listed in the PSBT have an invalid number {0}.
-       InvalidInputsNumber(usize),
+    /// inputs listed in the PSBT have an invalid number {0}.
+    InvalidInputsNumber(usize),
 
     /// contract {0} listed in the PSBT has zero known transition information.
     NoTransitions(ContractId),
@@ -164,9 +163,8 @@ pub enum RgbPsbtError {
     #[from(FromSliceError)]
     InvalidContractId,
 
-      /// invalid opids data: {0}.
-      InvalidOpidsData(String),
-
+    /// invalid opids data: {0}.
+    InvalidOpidsData(String),
 
     /// PSBT doesn't provide information about close method.
     NoCloseMethod,
@@ -219,7 +217,7 @@ pub trait RgbExt {
         let mut map = BTreeMap::new();
         for contract_id in self.rgb_contract_ids()? {
             let mut input_map: SmallOrdMap<Vin, SmallOrdSet<OpId>> = SmallOrdMap::new();
-                        let mut known_transitions: SmallOrdMap<OpId, Transition> = SmallOrdMap::new();
+            let mut known_transitions: SmallOrdMap<OpId, Transition> = SmallOrdMap::new();
             let contract_consumers = self.rgb_contract_consumers(contract_id)?;
             if contract_consumers.is_empty() {
                 return Err(RgbPsbtError::NoContractConsumers);
@@ -295,7 +293,6 @@ impl RgbExt for Psbt {
             Ok(set)
         })
     }
-
 
     fn rgb_transition(&self, opid: OpId) -> Result<Option<Transition>, RgbPsbtError> {
         let Some(data) = self.proprietary(&PropKey::rgb_transition(opid)) else {
@@ -404,14 +401,16 @@ pub trait RgbInExt {
 }
 
 impl RgbInExt for psbt::Input {
-    fn rgb_consumer(&self, contract_id: ContractId) -> Result<Option<Vec<OpId>>, RgbPsbtError> {        let Some(data) = self
+    fn rgb_consumer(&self, contract_id: ContractId) -> Result<Option<Vec<OpId>>, RgbPsbtError> {
+        let Some(data) = self
             .proprietary
             .get(&PropKey::rgb_in_consumed_by(contract_id))
         else {
             return Ok(None);
         };
         let opids = Opids::deserialize(data)?.0;
-        Ok(Some(opids))    }
+        Ok(Some(opids))
+    }
 
     fn set_rgb_consumer(
         &mut self,
