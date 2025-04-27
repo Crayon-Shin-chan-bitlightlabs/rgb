@@ -24,7 +24,7 @@ use std::marker::PhantomData;
 
 use bp::dbc::tapret::TapretProof;
 use bp::seals::txout::{CloseMethod, ExplicitSeal};
-use bp::{Outpoint, Sats, ScriptPubkey, Tx, Vout};
+use bp::{Outpoint, Sats, ScriptPubkey, Tx, Vout, Weight};
 use bpstd::{psbt, Address};
 use bpwallet::{Layer2, Layer2Tx, NoLayer2, TxRow, Wallet, WalletDescr};
 use psrgbt::{
@@ -139,6 +139,7 @@ where Self::Descr: DescriptorRgb<K>
         &mut self,
         stock: &Stock<S, H, P>,
         invoice: &RgbInvoice,
+        params: TransferParams,
         mut psbt: Psbt,
     ) -> Result<Psbt, CompositionError> {
         use bpstd::seals::txout::TxoSeal;
@@ -288,6 +289,16 @@ where Self::Descr: DescriptorRgb<K>
             output.tap_bip32_derivation = self.descriptor().xonly_keyset(change_terminal);
             output.proprietary = none!();
             output.unknown = none!();
+        }
+
+        if let Some(fee) = psbt.fee() {
+            let new_fee =
+                Sats::from_sats(Tx::from(psbt.to_unsigned_tx()).vbytes().to_u32()) * params.tx.fee;
+            assert!(new_fee > fee);
+
+            if let Some(output) = psbt.outputs_mut().last() {
+                output.amount -= new_fee - fee;
+            }
         }
 
         psbt.outputs_mut()
