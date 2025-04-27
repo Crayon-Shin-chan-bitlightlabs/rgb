@@ -248,8 +248,8 @@ where Self::Descr: DescriptorRgb<K>
             .map(|o| Outpoint::new(o.txid, o.vout))
             .collect::<Vec<_>>();
 
-        if let Some(outpoint) = prev_outpoints.get(0) {
-            if let Some(utxo) = self.utxo(*outpoint) {
+        for prev_outpoint in prev_outpoints {
+            if let Some(utxo) = self.utxo(prev_outpoint) {
                 let script = self
                     .descriptor()
                     .derive(utxo.terminal.keychain, utxo.terminal.index);
