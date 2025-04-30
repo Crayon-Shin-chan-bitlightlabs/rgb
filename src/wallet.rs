@@ -157,7 +157,7 @@ where W::Descr: DescriptorRgb<K>
         psbt: Psbt,
     ) -> Result<Psbt, CompositionError> {
         self.wallet
-            .construct_psbt_rgb_with_specific_outpoint(&self.stock, invoice, params, psbt)
+            .construct_psbt_rgb_with_specific_psbt(&self.stock, invoice, params, psbt)
     }
 
     #[allow(clippy::result_large_err)]

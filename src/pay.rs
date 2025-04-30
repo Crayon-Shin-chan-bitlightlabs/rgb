@@ -131,7 +131,7 @@ where Self::Descr: DescriptorRgb<K>
         Ok((psbt, meta, transfer))
     }
 
-    fn construct_psbt_rgb_with_specific_outpoint<
+    fn construct_psbt_rgb_with_specific_psbt<
         S: StashProvider,
         H: StateProvider,
         P: IndexProvider,
@@ -268,27 +268,32 @@ where Self::Descr: DescriptorRgb<K>
 
         assert!(psbt.outputs().count() > 0);
 
-        if let Some(output) = psbt.output_mut(0) {
-            let change_keychain = match *output.script.iter().next().unwrap() {
-                code @ 0x51..=0x60 => code - 0x50,
-                _ => panic!("this is hack by bitlight."),
-            };
+        let mut change_vout = None;
 
-            assert!(change_keychain == 1 || change_keychain == 10);
+        for (index, output) in psbt.outputs_mut().enumerate() {
+            let script_bytes = output.script.as_script_bytes();
+            assert!(!script_bytes.is_empty());
 
-            let change_index = self.next_derivation_index(change_keychain, true);
-            let change_terminal = Terminal::new(change_keychain, change_index);
-            let script = self.descriptor().derive(change_keychain, change_index);
+            if script_bytes.len() == 1 {
+                let change_keychain = script_bytes.last().map(|byte| *byte - 0x50).unwrap();
+                assert!(change_keychain == 1 || change_keychain == 10);
+                let change_index = self.next_derivation_index(change_keychain, true);
+                let change_terminal = Terminal::new(change_keychain, change_index);
+                let script = self.descriptor().derive(change_keychain, change_index);
 
-            output.script = script.to_script_pubkey();
-            output.redeem_script = script.to_redeem_script();
-            output.witness_script = script.to_witness_script();
-            output.bip32_derivation = self.descriptor().legacy_keyset(change_terminal);
-            output.tap_internal_key = script.to_internal_pk();
-            output.tap_tree = script.to_tap_tree();
-            output.tap_bip32_derivation = self.descriptor().xonly_keyset(change_terminal);
-            output.proprietary = none!();
-            output.unknown = none!();
+                output.script = script.to_script_pubkey();
+                output.redeem_script = script.to_redeem_script();
+                output.witness_script = script.to_witness_script();
+                output.bip32_derivation = self.descriptor().legacy_keyset(change_terminal);
+                output.tap_internal_key = script.to_internal_pk();
+                output.tap_tree = script.to_tap_tree();
+                output.tap_bip32_derivation = self.descriptor().xonly_keyset(change_terminal);
+                output.proprietary = none!();
+                output.unknown = none!();
+                output.set_tapret_host().expect("just created");
+                change_vout = Some(index);
+                break;
+            }
         }
 
         if let Some(fee) = psbt.fee() {
@@ -301,12 +306,18 @@ where Self::Descr: DescriptorRgb<K>
             }
         }
 
+        if change_vout.unwrap_or_default() != 0 {
+            let outputs_len = psbt.outputs().count();
+            psbt.sort_outputs_by(|outpoint| outputs_len - outpoint.index())
+                .unwrap();
+        }
+
         psbt.outputs_mut()
             .find(|o| o.script.is_p2tr())
             .map(|o| o.set_tapret_host().expect("just created"));
 
         let batch = stock
-            .compose(invoice, prev_outputs, Option::<Vout>::None, |_, _, _| Some(Vout::from_u32(0)))
+            .compose(invoice, prev_outputs, Option::<Vout>::None, |_, _, _| Some(Vout::from(0)))
             .map_err(|err| CompositionError::Stock(err.to_string()))?;
 
         psbt.set_rgb_close_method(close_method);
